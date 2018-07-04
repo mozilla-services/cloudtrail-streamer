@@ -1,4 +1,4 @@
-all: cloudtrail_streamer
+all: build
 
 # Package lambda function in zip file
 package:
@@ -14,22 +14,19 @@ packageupload:
 	fi
 	aws s3 cp cloudtrail-streamer.zip s3://$(CT_DEV_S3_BUCKET)/cloudtrail-streamer.zip
 
-lambda: clean dep cloudtrail_streamer
+lambda: clean build
 	apt-get update
 	apt-get install -y zip
 	zip cloudtrail-streamer.zip cloudtrail-streamer
 
-dep:
-	go get ./...
+build:
+	vgo build -ldflags="-s -w" -o cloudtrail-streamer
 
-cloudtrail_streamer:
-	go build -ldflags="-s -w" -o cloudtrail-streamer
-
-debug: cloudtrail_streamer
-	env CT_DEBUG=1 ./cloudtrail-streamer
+debug: build
+	env CT_DEBUG_LOGGING=1 ./cloudtrail-streamer
 
 clean:
 	rm -f cloudtrail-streamer cloudtrail-streamer.zip
 
-test: dep
+test:
 	go test ./...

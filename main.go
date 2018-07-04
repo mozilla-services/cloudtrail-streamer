@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -20,36 +21,6 @@ import (
 	"go.mozilla.org/mozlogrus"
 )
 
-var (
-	globalConfig  Config
-	kinesisClient *kinesis.Kinesis
-)
-
-type Config struct {
-	awsKinesisStream string // Kinesis stream for event submission
-	awsKinesisRegion string // AWS region the kinesis stream exists in
-
-	awsSession *session.Session
-}
-
-func (c *Config) init() {
-	c.awsKinesisStream = os.Getenv("CT_KINESIS_STREAM")
-	c.awsKinesisRegion = os.Getenv("CT_KINESIS_REGION")
-
-	c.awsSession = session.Must(session.NewSession())
-}
-
-func (c *Config) validate() error {
-	if c.awsKinesisStream == "" {
-		return fmt.Errorf("CT_KINESIS_STREAM must be set")
-	}
-	if c.awsKinesisRegion == "" {
-		return fmt.Errorf("CT_KINESIS_REGION must be set")
-	}
-
-	return nil
-}
-
 func init() {
 	if os.Getenv("CT_DEBUG_LOGGING") == "1" {
 		log.SetLevel(log.DebugLevel)
@@ -57,10 +28,68 @@ func init() {
 		log.SetLevel(log.InfoLevel)
 	}
 
-	log.SetFormatter(&mozlogrus.MozLogFormatter{
-		LoggerName: "cloudtrail-streamer",
-		Type:       "app.log",
-	})
+	mozlogrus.Enable("cloudtrail-streamer")
+}
+
+var (
+	globalConfig Config
+)
+
+type Config struct {
+	awsKinesisStream string // Kinesis stream for event submission
+	awsKinesisRegion string // AWS region the kinesis stream exists in
+
+	awsKinesisBatchSize int // Number of records in a batched put to the kinesis stream
+
+	awsKinesisClient *kinesis.Kinesis
+
+	awsSession *session.Session
+
+	eventType string // Whether to use the S3 or SNS event handler. Default is S3.
+}
+
+func (c *Config) init() error {
+	c.awsKinesisStream = os.Getenv("CT_KINESIS_STREAM")
+	if c.awsKinesisStream == "" {
+		return fmt.Errorf("CT_KINESIS_STREAM must be set")
+	}
+
+	c.awsKinesisRegion = os.Getenv("CT_KINESIS_REGION")
+	if c.awsKinesisRegion == "" {
+		return fmt.Errorf("CT_KINESIS_REGION must be set")
+	}
+
+	c.awsKinesisBatchSize = 500
+	batchSize := os.Getenv("CT_KINESIS_BATCH_SIZE")
+	if batchSize != "" {
+		var err error
+		c.awsKinesisBatchSize, err = strconv.Atoi(batchSize)
+		if err != nil {
+			log.Fatalf("Error converting CT_KINESIS_BATCH_SIZE (%v) to int: %s", batchSize, err)
+		}
+
+		if c.awsKinesisBatchSize > 500 {
+			return fmt.Errorf("CT_KINESIS_BATCH_SIZE is set to a value greater than 500")
+		}
+	}
+
+	c.awsSession = session.Must(session.NewSession())
+
+	c.awsKinesisClient = kinesis.New(
+		c.awsSession,
+		aws.NewConfig().WithRegion(c.awsKinesisRegion),
+	)
+
+	c.eventType = "S3"
+	eventType := os.Getenv("CT_EVENT_TYPE")
+	if eventType != "" {
+		c.eventType = eventType
+	}
+	if c.eventType != "S3" && c.eventType != "SNS" {
+		return fmt.Errorf("CT_EVENT_TYPE is set to an invalid value, %s, must be either 'S3' or 'SNS'", eventType)
+	}
+
+	return nil
 }
 
 type CloudTrailFile struct {
@@ -99,7 +128,11 @@ func readLogFile(object *s3.GetObjectOutput) (*CloudTrailFile, error) {
 	}
 
 	blobBuf := new(bytes.Buffer)
-	blobBuf.ReadFrom(logFileBlob)
+	_, err = blobBuf.ReadFrom(logFileBlob)
+	if err != nil {
+		log.Errorf("Error reading from logFileBlob: %s", err)
+		return nil, err
+	}
 
 	var logFile CloudTrailFile
 	err = json.Unmarshal(blobBuf.Bytes(), &logFile)
@@ -110,70 +143,24 @@ func readLogFile(object *s3.GetObjectOutput) (*CloudTrailFile, error) {
 	return &logFile, nil
 }
 
-func HandleRequest(ctx context.Context, s3Event events.S3Event) error {
-	log.Debugf("Handling event: %v", s3Event)
+func putRecordsToKinesis(logfile *CloudTrailFile) error {
+	var kRecordsBuf []*kinesis.PutRecordsRequestEntry
 
-	globalConfig.init()
-	err := globalConfig.validate()
-	if err != nil {
-		log.Errorf("Invalid config (%v): %s", globalConfig, err)
-		return err
-	}
-
-	kinesisClient = kinesis.New(
-		globalConfig.awsSession,
-		aws.NewConfig().WithRegion(globalConfig.awsKinesisRegion),
-	)
-
-	for _, s3Record := range s3Event.Records {
-		s3Client := s3.New(
-			globalConfig.awsSession,
-			aws.NewConfig().WithRegion(s3Record.AWSRegion),
-		)
-		bucket := s3Record.S3.Bucket.Name
-		objectKey := s3Record.S3.Object.Key
-
-		log.Debugf("Reading %s from %s", objectKey, bucket)
-		object, err := fetchLogFromS3(s3Client, bucket, objectKey)
+	for _, record := range logfile.Records {
+		log.Debugf("Writing record to kinesis: %v", record)
+		encodedRecord, err := json.Marshal(record)
 		if err != nil {
-			return err
+			log.Errorf("Error marshalling record (%v) to json: %s", record, err)
+			continue
 		}
 
-		logFile, err := readLogFile(object)
-		if err != nil {
-			return err
-		}
+		kRecordsBuf = append(kRecordsBuf, &kinesis.PutRecordsRequestEntry{
+			Data:         encodedRecord,
+			PartitionKey: aws.String("key"), //TODO: is this right?
+		})
 
-		var kRecordsBuf []*kinesis.PutRecordsRequestEntry
-		for _, record := range logFile.Records {
-			log.Debugf("Writing record to kinesis: %v", record)
-			encodedRecord, err := json.Marshal(record)
-			if err != nil {
-				log.Errorf("Error marshalling record (%v) to json: %s", record, err)
-				continue
-			}
-
-			kRecordsBuf = append(kRecordsBuf, &kinesis.PutRecordsRequestEntry{
-				Data:         encodedRecord,
-				PartitionKey: aws.String("key"), //TODO: is this right?
-			})
-
-			if len(kRecordsBuf) > 0 && len(kRecordsBuf)%500 == 0 {
-				_, err = kinesisClient.PutRecords(&kinesis.PutRecordsInput{
-					Records:    kRecordsBuf,
-					StreamName: aws.String(globalConfig.awsKinesisStream),
-				})
-				if err != nil {
-					log.Errorf("Error pushing records to kinesis: %s", err)
-					return err
-				}
-
-				kRecordsBuf = kRecordsBuf[:0]
-			}
-		}
-
-		if len(kRecordsBuf) != 0 {
-			_, err = kinesisClient.PutRecords(&kinesis.PutRecordsInput{
+		if len(kRecordsBuf) > 0 && len(kRecordsBuf)%globalConfig.awsKinesisBatchSize == 0 {
+			_, err = globalConfig.awsKinesisClient.PutRecords(&kinesis.PutRecordsInput{
 				Records:    kRecordsBuf,
 				StreamName: aws.String(globalConfig.awsKinesisStream),
 			})
@@ -181,12 +168,89 @@ func HandleRequest(ctx context.Context, s3Event events.S3Event) error {
 				log.Errorf("Error pushing records to kinesis: %s", err)
 				return err
 			}
+
+			kRecordsBuf = kRecordsBuf[:0]
+		}
+	}
+
+	if len(kRecordsBuf) != 0 {
+		_, err := globalConfig.awsKinesisClient.PutRecords(&kinesis.PutRecordsInput{
+			Records:    kRecordsBuf,
+			StreamName: aws.String(globalConfig.awsKinesisStream),
+		})
+		if err != nil {
+			log.Errorf("Error pushing records to kinesis: %s", err)
+			return err
 		}
 	}
 
 	return nil
 }
 
+func streamS3ObjectToKinesis(awsRegion string, bucket string, objectKey string) error {
+	s3Client := s3.New(
+		globalConfig.awsSession,
+		aws.NewConfig().WithRegion(awsRegion),
+	)
+
+	log.Debugf("Reading %s from %s", objectKey, bucket)
+	object, err := fetchLogFromS3(s3Client, bucket, objectKey)
+	if err != nil {
+		return err
+	}
+
+	logFile, err := readLogFile(object)
+	if err != nil {
+		return err
+	}
+
+	err = putRecordsToKinesis(logFile)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func S3Handler(ctx context.Context, s3Event events.S3Event) error {
+	log.Debugf("Handling event: %v", s3Event)
+
+	for _, s3Record := range s3Event.Records {
+		err := streamS3ObjectToKinesis(
+			s3Record.AWSRegion,
+			s3Record.S3.Bucket.Name,
+			s3Record.S3.Object.Key,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func SNSHandler(ctx context.Context, snsEvent events.SNSEvent) error {
+	log.Debugf("Handling event: %v", snsEvent)
+
+	//for _, snsRecord := range snsEvent.Records {
+	//}
+
+	return nil
+}
+
 func main() {
-	lambda.Start(HandleRequest)
+	err := globalConfig.init()
+	if err != nil {
+		log.Fatalf("Invalid config (%v): %s", globalConfig, err)
+	}
+
+	// TODO - switch on config for sns or s3
+	if globalConfig.eventType == "S3" {
+		lambda.Start(S3Handler)
+	} else if globalConfig.eventType == "SNS" {
+		lambda.Start(SNSHandler)
+	} else {
+		log.Fatalf("eventType (%s) is not set to either S3 or SNS.", globalConfig.eventType)
+	}
+
 }
