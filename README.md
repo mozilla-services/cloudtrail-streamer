@@ -4,7 +4,8 @@ This is a Lambda function that will stream Cloudtrail logs saved to an S3 bucket
 a single Kinesis stream.
 
 It can support any number of S3 buckets, as it executes based off of any S3 notification
-events OR SNS topic events, but the code is specific to Cloudtrail logs. It will decode
+events sent either directly to the lambda func or to an SNS topic that the lambda func subscribes
+to, but the code is specific to Cloudtrail logs. It will decode
 the Cloudtrail JSON and send one "Record" at a time to the kinesis stream.
 
 Any single lambda function running this code can only support EITHER S3 events or SNS events.
@@ -39,7 +40,7 @@ Example: `CT_KINESIS_REGION="us-west-2"`
 
 The type of event that will be sent to the Lambda function. Default is `CT_EVENT_TYPE="S3"`.
 
-To use SNS event handler, set `CT_EVENT_TYPE="SNS"`.
+To use the SNS event handler, set `CT_EVENT_TYPE="SNS"`.
 
 #### CT_DEBUG_LOGGING (optional)
 
