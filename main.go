@@ -213,7 +213,7 @@ func streamS3ObjectToKinesis(awsRegion string, bucket string, objectKey string) 
 }
 
 func S3Handler(ctx context.Context, s3Event events.S3Event) error {
-	log.Debugf("Handling event: %v", s3Event)
+	log.Debugf("Handling S3 event: %v", s3Event)
 
 	for _, s3Record := range s3Event.Records {
 		err := streamS3ObjectToKinesis(
@@ -230,10 +230,16 @@ func S3Handler(ctx context.Context, s3Event events.S3Event) error {
 }
 
 func SNSHandler(ctx context.Context, snsEvent events.SNSEvent) error {
-	log.Debugf("Handling event: %v", snsEvent)
+	log.Debugf("Handling SNS event: %v", snsEvent)
 
-	//for _, snsRecord := range snsEvent.Records {
-	//}
+	for _, snsRecord := range snsEvent.Records {
+		var s3Event events.S3Event
+		err := json.Unmarshal([]byte(snsRecord.SNS.Message), &s3Event)
+		if err != nil {
+			return err
+		}
+		return S3Handler(ctx, s3Event)
+	}
 
 	return nil
 }
@@ -244,13 +250,13 @@ func main() {
 		log.Fatalf("Invalid config (%v): %s", globalConfig, err)
 	}
 
-	// TODO - switch on config for sns or s3
 	if globalConfig.eventType == "S3" {
+		log.Debug("Starting S3Handler")
 		lambda.Start(S3Handler)
 	} else if globalConfig.eventType == "SNS" {
+		log.Debug("Starting SNSHandler")
 		lambda.Start(SNSHandler)
 	} else {
 		log.Fatalf("eventType (%s) is not set to either S3 or SNS.", globalConfig.eventType)
 	}
-
 }
