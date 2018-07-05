@@ -238,7 +238,11 @@ func SNSHandler(ctx context.Context, snsEvent events.SNSEvent) error {
 		if err != nil {
 			return err
 		}
-		return S3Handler(ctx, s3Event)
+
+		err = S3Handler(ctx, s3Event)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
