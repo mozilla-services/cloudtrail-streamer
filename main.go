@@ -68,8 +68,8 @@ func (c *Config) init() error {
 			log.Fatalf("Error converting CT_KINESIS_BATCH_SIZE (%v) to int: %s", batchSize, err)
 		}
 
-		if c.awsKinesisBatchSize > 500 {
-			return fmt.Errorf("CT_KINESIS_BATCH_SIZE is set to a value greater than 500")
+		if c.awsKinesisBatchSize <= 0 || c.awsKinesisBatchSize > 500 {
+			return fmt.Errorf("CT_KINESIS_BATCH_SIZE must be set to a value inbetween 1 and 500")
 		}
 	}
 
@@ -105,14 +105,10 @@ func fetchLogFromS3(s3Client *s3.S3, bucket string, objectKey string) (*s3.GetOb
 	object, err := s3Client.GetObject(logInput)
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
-			switch aerr.Code() {
-			case s3.ErrCodeNoSuchKey:
-				log.Errorf("%s: %s", s3.ErrCodeNoSuchKey, aerr)
-			default:
-				log.Errorf("AWS Error: %s", aerr)
-			}
+			log.Errorf("AWS Error: %s", aerr)
 			return nil, aerr
 		}
+		log.Errorf("Error getting S3 object: %s", err)
 		return nil, err
 	}
 
@@ -126,6 +122,7 @@ func readLogFile(object *s3.GetObjectOutput) (*CloudTrailFile, error) {
 		log.Errorf("Error unzipping cloudtrail json file: %s", err)
 		return nil, err
 	}
+	defer logFileBlob.Close()
 
 	blobBuf := new(bytes.Buffer)
 	_, err = blobBuf.ReadFrom(logFileBlob)
@@ -137,6 +134,7 @@ func readLogFile(object *s3.GetObjectOutput) (*CloudTrailFile, error) {
 	var logFile CloudTrailFile
 	err = json.Unmarshal(blobBuf.Bytes(), &logFile)
 	if err != nil {
+		log.Errorf("Error unmarshalling s3 object to CloudTrailFile: %s", err)
 		return nil, err
 	}
 
