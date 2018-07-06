@@ -14,9 +14,12 @@ packageupload:
 	fi
 	aws s3 cp cloudtrail-streamer.zip s3://$(CT_DEV_S3_BUCKET)/cloudtrail-streamer.zip
 
-lambda: clean build
+docker_build: clean build
 	apt-get update
 	apt-get install -y zip
+	zip cloudtrail-streamer.zip cloudtrail-streamer
+
+local_build: clean build
 	zip cloudtrail-streamer.zip cloudtrail-streamer
 
 build:
