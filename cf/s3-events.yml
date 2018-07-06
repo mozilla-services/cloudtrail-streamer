@@ -1,14 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'cloudtrail-streamer dev template'
+Description: 'cloudtrail-streamer dev template for s3 events'
 Parameters:
   LambdaBucket:
     Description: 'S3 bucket with Lambda code'
     Type: String
   LambdaKey:
     Description: 'S3 bucket key with Lambda code'
-    Type: String
-  KinesisStream:
-    Description: 'Kinesis stream for event submission'
     Type: String
 Resources:
   CTStreamerRole:
@@ -26,7 +23,7 @@ Resources:
             Statement:
               - Action:
                   - 's3:GetObject'
-                Resource: !Sub ${S3Bucket.Arn}/*
+                Resource: "arn:aws:s3:::ctstreamer-dev-s3/*" # Hardcoded to avoid circular dependencies
                 Effect: 'Allow'
           PolicyName: CTStreamer-GetCloudtrailLogs
         - PolicyDocument:
@@ -48,23 +45,26 @@ Resources:
 
   S3Bucket:
     Type: 'AWS::S3::Bucket'
+    DependsOn:
+      - CTStreamerFunction
+      - PermissionForS3BucketToInvokeLambda
     Properties:
-      BucketName: 'dev-cloudtrail-streamer'
+      BucketName: 'ctstreamer-dev-s3'
       NotificationConfiguration:
         LambdaConfigurations:
-          Function: !Sub ${CTStreamerFunction.Arn}
-          Event: 's3:ObjectCreated:*'
+          - Function: !Sub ${CTStreamerFunction.Arn}
+            Event: 's3:ObjectCreated:*'
 
   KinesisStream:
     Type: 'AWS::Kinesis::Stream'
     Properties:
-      Name: 'dev-cloudtrail-streamer'
+      Name: 'ctstreamer-dev-s3'
       ShardCount: 1
 
   PermissionForS3BucketToInvokeLambda:
     Type: 'AWS::Lambda::Permission'
     Properties:
-      SourceArn: !Sub ${S3Bucket.Arn}
+      SourceArn: "arn:aws:s3:::ctstreamer-dev-s3" # Hardcoded to avoid circular dependencies
       Action: lambda:InvokeFunction
       FunctionName: !Ref CTStreamerFunction
       Principal: s3.amazonaws.com
@@ -73,9 +73,9 @@ Resources:
     Type: 'AWS::Lambda::Function'
     Properties:
       Description: cloudtrail-streamer Lambda function
-      FunctionName: ctstreamer-dev-lambda
+      FunctionName: ctstreamer-dev-s3
       Handler: cloudtrail-streamer
-      Role: !Ref CTStreamerRole
+      Role: !Sub ${CTStreamerRole.Arn}
       Runtime: go1.x
       Timeout: 60
       Code:
