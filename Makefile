@@ -2,7 +2,7 @@ all: build
 
 # Package lambda function in zip file
 package:
-	docker run -i --rm -v `pwd`:/go/src/github.com/mozilla-services/cloudtrail-streamer \
+	docker run -i --rm -v `pwd`:/go/src/github.com/mozilla-services/cloudtrail-streamer -e CGO_ENABLED=0\
 		golang:1.10 \
 		/bin/bash -c 'cd /go/src/github.com/mozilla-services/cloudtrail-streamer && make docker_build'
 
