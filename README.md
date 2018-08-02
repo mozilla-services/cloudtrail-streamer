@@ -36,6 +36,14 @@ The region that the Kinesis stream lives in.
 
 Example: `CT_KINESIS_REGION="us-west-2"`
 
+#### CT_S3_ROLE_ARN (optional)
+
+Role to assume for use by the s3 client.
+
+Useful when this Lambda function and the S3 bucket with CloudTrail logs are in different AWS accounts.
+
+Example: `CT_S3_ROLE_ARN="arn:aws:iam::555555555555:role/CloudtrailGetObjectRole"`
+
 #### CT_EVENT_TYPE (optional)
 
 The type of event that will be sent to the Lambda function. Default is `CT_EVENT_TYPE="S3"`.

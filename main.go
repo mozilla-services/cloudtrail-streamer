@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -35,17 +37,17 @@ var (
 	globalConfig Config
 )
 
-type Config struct {
-	awsKinesisStream string // Kinesis stream for event submission
-	awsKinesisRegion string // AWS region the kinesis stream exists in
+const GZIP_CONTENT_TYPE = "application/x-gzip"
 
-	awsKinesisBatchSize int // Number of records in a batched put to the kinesis stream
+type Config struct {
+	awsKinesisStream    string // Kinesis stream for event submission
+	awsKinesisRegion    string // AWS region the kinesis stream exists in
+	awsKinesisBatchSize int    // Number of records in a batched put to the kinesis stream
+	awsS3RoleArn        string // Optional Role to assume for S3 operations
+	eventType           string // Whether to use the S3 or SNS event handler. Default is S3.
 
 	awsKinesisClient *kinesis.Kinesis
-
-	awsSession *session.Session
-
-	eventType string // Whether to use the S3 or SNS event handler. Default is S3.
+	awsSession       *session.Session
 }
 
 func (c *Config) init() error {
@@ -73,12 +75,7 @@ func (c *Config) init() error {
 		}
 	}
 
-	c.awsSession = session.Must(session.NewSession())
-
-	c.awsKinesisClient = kinesis.New(
-		c.awsSession,
-		aws.NewConfig().WithRegion(c.awsKinesisRegion),
-	)
+	c.awsS3RoleArn = os.Getenv("CT_S3_ROLE_ARN")
 
 	c.eventType = "S3"
 	eventType := os.Getenv("CT_EVENT_TYPE")
@@ -89,6 +86,14 @@ func (c *Config) init() error {
 		return fmt.Errorf("CT_EVENT_TYPE is set to an invalid value, %s, must be either 'S3' or 'SNS'", eventType)
 	}
 
+	c.awsSession = session.Must(session.NewSession())
+
+	c.awsKinesisClient = kinesis.New(
+		c.awsSession,
+		aws.NewConfig().WithRegion(c.awsKinesisRegion),
+	)
+
+	log.Debugf("Config: %v", c)
 	return nil
 }
 
@@ -102,6 +107,7 @@ func fetchLogFromS3(s3Client *s3.S3, bucket string, objectKey string) (*s3.GetOb
 		Key:    aws.String(objectKey),
 	}
 
+	log.Debugf("Calling GetObject with GetObjectInput: %+v", logInput)
 	object, err := s3Client.GetObject(logInput)
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
@@ -112,17 +118,40 @@ func fetchLogFromS3(s3Client *s3.S3, bucket string, objectKey string) (*s3.GetOb
 		return nil, err
 	}
 
+	if object.ContentEncoding != nil {
+		log.Debugf("Obj ContentEncoding: %s", *object.ContentEncoding)
+	} else {
+		log.Debugf("Obj ContentEncoding is nil")
+	}
+	if object.ContentType != nil {
+		log.Debugf("Obj ContentType: %s", *object.ContentType)
+	} else {
+		log.Debugf("Obj ContentType is nil")
+	}
+	if object.ContentLength != nil {
+		log.Debugf("Obj ContentLength: %d", *object.ContentLength)
+	} else {
+		log.Debugf("Obj ContentLength is nil")
+	}
+
 	return object, nil
 }
 
 func readLogFile(object *s3.GetObjectOutput) (*CloudTrailFile, error) {
 	defer object.Body.Close()
-	logFileBlob, err := gzip.NewReader(object.Body)
-	if err != nil {
-		log.Errorf("Error unzipping cloudtrail json file: %s", err)
-		return nil, err
+
+	var logFileBlob io.ReadCloser
+	var err error
+	if object.ContentType != nil && *object.ContentType == GZIP_CONTENT_TYPE {
+		logFileBlob, err = gzip.NewReader(object.Body)
+		if err != nil {
+			log.Errorf("Error unzipping cloudtrail json file: %s", err)
+			return nil, err
+		}
+		defer logFileBlob.Close()
+	} else {
+		logFileBlob = object.Body
 	}
-	defer logFileBlob.Close()
 
 	blobBuf := new(bytes.Buffer)
 	_, err = blobBuf.ReadFrom(logFileBlob)
@@ -186,12 +215,16 @@ func putRecordsToKinesis(logfile *CloudTrailFile) error {
 }
 
 func streamS3ObjectToKinesis(awsRegion string, bucket string, objectKey string) error {
-	s3Client := s3.New(
-		globalConfig.awsSession,
-		aws.NewConfig().WithRegion(awsRegion),
-	)
+	s3ClientConfig := aws.NewConfig().WithRegion(awsRegion)
+	if globalConfig.awsS3RoleArn != "" {
+		creds := stscreds.NewCredentials(globalConfig.awsSession, globalConfig.awsS3RoleArn)
+		s3ClientConfig.Credentials = creds
+		log.Debugf("S3 client config: %v", s3ClientConfig)
+	}
+	s3Client := s3.New(globalConfig.awsSession, s3ClientConfig)
 
-	log.Debugf("Reading %s from %s", objectKey, bucket)
+	log.Debugf("Reading %s from %s with client config of %+v", objectKey, bucket, s3Client.Config)
+
 	object, err := fetchLogFromS3(s3Client, bucket, objectKey)
 	if err != nil {
 		return err
@@ -211,6 +244,7 @@ func streamS3ObjectToKinesis(awsRegion string, bucket string, objectKey string) 
 }
 
 func S3Handler(ctx context.Context, s3Event events.S3Event) error {
+	log.Debugf("Received context: %+v", ctx)
 	log.Debugf("Handling S3 event: %v", s3Event)
 
 	for _, s3Record := range s3Event.Records {
@@ -228,7 +262,7 @@ func S3Handler(ctx context.Context, s3Event events.S3Event) error {
 }
 
 func SNSHandler(ctx context.Context, snsEvent events.SNSEvent) error {
-	log.Debugf("Handling SNS event: %v", snsEvent)
+	log.Debugf("Handling SNS event: %+v", snsEvent)
 
 	for _, snsRecord := range snsEvent.Records {
 		var s3Event events.S3Event
