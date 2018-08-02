@@ -74,6 +74,7 @@ func (c *Config) init() error {
 	}
 
 	c.awsSession = session.Must(session.NewSession())
+	log.Debugf("Session Config: %+v", c.awsSession.Config)
 
 	c.awsKinesisClient = kinesis.New(
 		c.awsSession,
@@ -102,6 +103,7 @@ func fetchLogFromS3(s3Client *s3.S3, bucket string, objectKey string) (*s3.GetOb
 		Key:    aws.String(objectKey),
 	}
 
+	log.Debugf("Calling GetObject with GetObjectInput: %+v", logInput)
 	object, err := s3Client.GetObject(logInput)
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
@@ -191,7 +193,7 @@ func streamS3ObjectToKinesis(awsRegion string, bucket string, objectKey string) 
 		aws.NewConfig().WithRegion(awsRegion),
 	)
 
-	log.Debugf("Reading %s from %s", objectKey, bucket)
+	log.Debugf("Reading %s from %s with client config of %+v", objectKey, bucket, s3Client)
 	object, err := fetchLogFromS3(s3Client, bucket, objectKey)
 	if err != nil {
 		return err
@@ -211,6 +213,7 @@ func streamS3ObjectToKinesis(awsRegion string, bucket string, objectKey string) 
 }
 
 func S3Handler(ctx context.Context, s3Event events.S3Event) error {
+	log.Debugf("Received context: %+v", ctx)
 	log.Debugf("Handling S3 event: %v", s3Event)
 
 	for _, s3Record := range s3Event.Records {
@@ -228,7 +231,7 @@ func S3Handler(ctx context.Context, s3Event events.S3Event) error {
 }
 
 func SNSHandler(ctx context.Context, snsEvent events.SNSEvent) error {
-	log.Debugf("Handling SNS event: %v", snsEvent)
+	log.Debugf("Handling SNS event: %+v", snsEvent)
 
 	for _, snsRecord := range snsEvent.Records {
 		var s3Event events.S3Event
