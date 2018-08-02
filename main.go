@@ -74,7 +74,6 @@ func (c *Config) init() error {
 	}
 
 	c.awsSession = session.Must(session.NewSession())
-	log.Debugf("Session Config: %+v", c.awsSession.Config)
 
 	c.awsKinesisClient = kinesis.New(
 		c.awsSession,
@@ -188,6 +187,8 @@ func putRecordsToKinesis(logfile *CloudTrailFile) error {
 }
 
 func streamS3ObjectToKinesis(awsRegion string, bucket string, objectKey string) error {
+	log.Debugf("Session Config: %+v", globalConfig.awsSession.Config)
+	log.Debugf("Session Credentials: %+v", globalConfig.awsSession.Config.Credentials)
 	s3Client := s3.New(
 		globalConfig.awsSession,
 		aws.NewConfig().WithRegion(awsRegion),
