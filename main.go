@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -36,16 +37,14 @@ var (
 )
 
 type Config struct {
-	awsKinesisStream string // Kinesis stream for event submission
-	awsKinesisRegion string // AWS region the kinesis stream exists in
-
-	awsKinesisBatchSize int // Number of records in a batched put to the kinesis stream
+	awsKinesisStream    string // Kinesis stream for event submission
+	awsKinesisRegion    string // AWS region the kinesis stream exists in
+	awsKinesisBatchSize int    // Number of records in a batched put to the kinesis stream
+	awsS3RoleArn        string // Optional Role to assume for S3 operations
+	eventType           string // Whether to use the S3 or SNS event handler. Default is S3.
 
 	awsKinesisClient *kinesis.Kinesis
-
-	awsSession *session.Session
-
-	eventType string // Whether to use the S3 or SNS event handler. Default is S3.
+	awsSession       *session.Session
 }
 
 func (c *Config) init() error {
@@ -73,12 +72,7 @@ func (c *Config) init() error {
 		}
 	}
 
-	c.awsSession = session.Must(session.NewSession())
-
-	c.awsKinesisClient = kinesis.New(
-		c.awsSession,
-		aws.NewConfig().WithRegion(c.awsKinesisRegion),
-	)
+	c.awsS3RoleArn = os.Getenv("CT_S3_ROLE_ARN")
 
 	c.eventType = "S3"
 	eventType := os.Getenv("CT_EVENT_TYPE")
@@ -88,6 +82,13 @@ func (c *Config) init() error {
 	if c.eventType != "S3" && c.eventType != "SNS" {
 		return fmt.Errorf("CT_EVENT_TYPE is set to an invalid value, %s, must be either 'S3' or 'SNS'", eventType)
 	}
+
+	c.awsSession = session.Must(session.NewSession())
+
+	c.awsKinesisClient = kinesis.New(
+		c.awsSession,
+		aws.NewConfig().WithRegion(c.awsKinesisRegion),
+	)
 
 	return nil
 }
@@ -189,10 +190,13 @@ func putRecordsToKinesis(logfile *CloudTrailFile) error {
 func streamS3ObjectToKinesis(awsRegion string, bucket string, objectKey string) error {
 	log.Debugf("Session Config: %+v", globalConfig.awsSession.Config)
 	log.Debugf("Session Credentials: %+v", globalConfig.awsSession.Config.Credentials)
-	s3Client := s3.New(
-		globalConfig.awsSession,
-		aws.NewConfig().WithRegion(awsRegion),
-	)
+
+	s3ClientConfig := aws.NewConfig().WithRegion(awsRegion)
+	if globalConfig.awsS3RoleArn != "" {
+		creds := stscreds.NewCredentials(globalConfig.awsSession, globalConfig.awsS3RoleArn)
+		s3ClientConfig.Credentials = creds
+	}
+	s3Client := s3.New(globalConfig.awsSession, s3ClientConfig)
 
 	log.Debugf("Reading %s from %s with client config of %+v", objectKey, bucket, s3Client)
 	object, err := fetchLogFromS3(s3Client, bucket, objectKey)

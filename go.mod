@@ -2,7 +2,7 @@ module github.com/mozilla-services/cloudtrail-streamer
 
 require (
 	github.com/aws/aws-lambda-go v1.2.0
-	github.com/aws/aws-sdk-go v1.14.32
+	github.com/aws/aws-sdk-go v1.15.7
 	github.com/go-ini/ini v1.38.1
 	github.com/jmespath/go-jmespath v0.0.0-20180206201540-c2b33e8439af
 	github.com/sirupsen/logrus v1.0.6
