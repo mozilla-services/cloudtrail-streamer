@@ -198,7 +198,13 @@ func streamS3ObjectToKinesis(awsRegion string, bucket string, objectKey string) 
 	}
 	s3Client := s3.New(globalConfig.awsSession, s3ClientConfig)
 
-	log.Debugf("Reading %s from %s with client config of %+v", objectKey, bucket, s3Client)
+	log.Debugf("Reading %s from %s with client config of %+v", objectKey, bucket, s3Client.Config)
+	creds, err := s3Client.Config.Credentials.Get()
+	if err != nil {
+		log.Errorf("Error getting credentials from s3Client.Config. Err: %s", err)
+	}
+	log.Debugf("Client Credentials: %v", creds)
+
 	object, err := fetchLogFromS3(s3Client, bucket, objectKey)
 	if err != nil {
 		return err
