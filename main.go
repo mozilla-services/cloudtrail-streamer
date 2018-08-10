@@ -195,6 +195,7 @@ func streamS3ObjectToKinesis(awsRegion string, bucket string, objectKey string) 
 	if globalConfig.awsS3RoleArn != "" {
 		creds := stscreds.NewCredentials(globalConfig.awsSession, globalConfig.awsS3RoleArn)
 		s3ClientConfig.Credentials = creds
+		log.Debugf("STS Credentials: %v", creds)
 	}
 	s3Client := s3.New(globalConfig.awsSession, s3ClientConfig)
 
