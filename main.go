@@ -90,6 +90,7 @@ func (c *Config) init() error {
 		aws.NewConfig().WithRegion(c.awsKinesisRegion),
 	)
 
+	log.Debugf("Config: %v", c)
 	return nil
 }
 
@@ -196,6 +197,7 @@ func streamS3ObjectToKinesis(awsRegion string, bucket string, objectKey string) 
 		creds := stscreds.NewCredentials(globalConfig.awsSession, globalConfig.awsS3RoleArn)
 		s3ClientConfig.Credentials = creds
 		log.Debugf("STS Credentials: %v", creds)
+		log.Debugf("S3 client config: %v", s3ClientConfig)
 	}
 	s3Client := s3.New(globalConfig.awsSession, s3ClientConfig)
 
