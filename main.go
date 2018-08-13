@@ -115,9 +115,23 @@ func fetchLogFromS3(s3Client *s3.S3, bucket string, objectKey string) (*s3.GetOb
 		return nil, err
 	}
 
-	log.Debugf("Obj ContentEncoding: %s", *object.ContentEncoding)
-	log.Debugf("Obj ContentType: %s", *object.ContentType)
-	log.Debugf("Obj ContentLength: %d", *object.ContentLength)
+	if object.ContentEncoding != nil {
+		log.Debugf("Obj ContentEncoding: %s", *object.ContentEncoding)
+	} else {
+		log.Debugf("Obj ContentEncoding: nil")
+	}
+
+	if object.ContentType != nil {
+		log.Debugf("Obj ContentType: %s", *object.ContentType)
+	} else {
+		log.Debugf("Obj ContentType: nil")
+	}
+
+	if object.ContentLength != nil {
+		log.Debugf("Obj ContentLength: %d", *object.ContentLength)
+	} else {
+		log.Debugf("Obj ContentLength: nil")
+	}
 
 	return object, nil
 }
