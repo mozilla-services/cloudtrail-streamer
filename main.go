@@ -115,9 +115,21 @@ func fetchLogFromS3(s3Client *s3.S3, bucket string, objectKey string) (*s3.GetOb
 		return nil, err
 	}
 
-	log.Debugf("Obj ContentEncoding: %s", *object.ContentEncoding)
-	log.Debugf("Obj ContentType: %s", *object.ContentType)
-	log.Debugf("Obj ContentLength: %d", *object.ContentLength)
+	if object.ContentEncoding != nil {
+		log.Debugf("Obj ContentEncoding: %s", *object.ContentEncoding)
+	} else {
+		log.Debugf("Obj ContentEncoding is nil")
+	}
+	if object.ContentType != nil {
+		log.Debugf("Obj ContentType: %s", *object.ContentType)
+	} else {
+		log.Debugf("Obj ContentType is nil")
+	}
+	if object.ContentLength != nil {
+		log.Debugf("Obj ContentLength: %d", *object.ContentLength)
+	} else {
+		log.Debugf("Obj ContentLength is nil")
+	}
 
 	return object, nil
 }
@@ -193,14 +205,14 @@ func putRecordsToKinesis(logfile *CloudTrailFile) error {
 }
 
 func streamS3ObjectToKinesis(awsRegion string, bucket string, objectKey string) error {
-	log.Debugf("Session Config: %+v", globalConfig.awsSession.Config)
+	// log.Debugf("Session Config: %+v", globalConfig.awsSession.Config)
 	log.Debugf("Session Credentials: %+v", globalConfig.awsSession.Config.Credentials)
 
 	s3ClientConfig := aws.NewConfig().WithRegion(awsRegion)
 	if globalConfig.awsS3RoleArn != "" {
 		creds := stscreds.NewCredentials(globalConfig.awsSession, globalConfig.awsS3RoleArn)
 		s3ClientConfig.Credentials = creds
-		log.Debugf("STS Credentials: %v", creds)
+		// log.Debugf("STS Credentials: %v", creds)
 		log.Debugf("S3 client config: %v", s3ClientConfig)
 	}
 	s3Client := s3.New(globalConfig.awsSession, s3ClientConfig)
