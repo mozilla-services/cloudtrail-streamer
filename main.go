@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 
@@ -35,6 +36,8 @@ func init() {
 var (
 	globalConfig Config
 )
+
+const GZIP_CONTENT_TYPE = "application/x-gzip"
 
 type Config struct {
 	awsKinesisStream    string // Kinesis stream for event submission
@@ -136,15 +139,21 @@ func fetchLogFromS3(s3Client *s3.S3, bucket string, objectKey string) (*s3.GetOb
 
 func readLogFile(object *s3.GetObjectOutput) (*CloudTrailFile, error) {
 	defer object.Body.Close()
-	logFileBlob, err := gzip.NewReader(object.Body)
-	if err != nil {
-		log.Errorf("Error unzipping cloudtrail json file: %s", err)
-		return nil, err
+
+	var logFileBlob io.ReadCloser
+	if object.ContentType != nil && *object.ContentType == GZIP_CONTENT_TYPE {
+		logFileBlob, err := gzip.NewReader(object.Body)
+		if err != nil {
+			log.Errorf("Error unzipping cloudtrail json file: %s", err)
+			return nil, err
+		}
+		defer logFileBlob.Close()
+	} else {
+		logFileBlob = object.Body
 	}
-	defer logFileBlob.Close()
 
 	blobBuf := new(bytes.Buffer)
-	_, err = blobBuf.ReadFrom(logFileBlob)
+	_, err := blobBuf.ReadFrom(logFileBlob)
 	if err != nil {
 		log.Errorf("Error reading from logFileBlob: %s", err)
 		return nil, err
