@@ -93,7 +93,6 @@ func (c *Config) init() error {
 		aws.NewConfig().WithRegion(c.awsKinesisRegion),
 	)
 
-	log.Debugf("Config: %v", c)
 	return nil
 }
 
@@ -116,22 +115,6 @@ func fetchLogFromS3(s3Client *s3.S3, bucket string, objectKey string) (*s3.GetOb
 		}
 		log.Errorf("Error getting S3 object: %s", err)
 		return nil, err
-	}
-
-	if object.ContentEncoding != nil {
-		log.Debugf("Obj ContentEncoding: %s", *object.ContentEncoding)
-	} else {
-		log.Debugf("Obj ContentEncoding is nil")
-	}
-	if object.ContentType != nil {
-		log.Debugf("Obj ContentType: %s", *object.ContentType)
-	} else {
-		log.Debugf("Obj ContentType is nil")
-	}
-	if object.ContentLength != nil {
-		log.Debugf("Obj ContentLength: %d", *object.ContentLength)
-	} else {
-		log.Debugf("Obj ContentLength is nil")
 	}
 
 	return object, nil
@@ -219,7 +202,6 @@ func streamS3ObjectToKinesis(awsRegion string, bucket string, objectKey string) 
 	if globalConfig.awsS3RoleArn != "" {
 		creds := stscreds.NewCredentials(globalConfig.awsSession, globalConfig.awsS3RoleArn)
 		s3ClientConfig.Credentials = creds
-		log.Debugf("S3 client config: %v", s3ClientConfig)
 	}
 	s3Client := s3.New(globalConfig.awsSession, s3ClientConfig)
 
