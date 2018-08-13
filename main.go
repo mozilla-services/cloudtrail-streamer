@@ -106,7 +106,6 @@ func fetchLogFromS3(s3Client *s3.S3, bucket string, objectKey string) (*s3.GetOb
 		Key:    aws.String(objectKey),
 	}
 
-	log.Debugf("Calling GetObject with GetObjectInput: %+v", logInput)
 	object, err := s3Client.GetObject(logInput)
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
