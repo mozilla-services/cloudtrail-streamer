@@ -141,8 +141,9 @@ func readLogFile(object *s3.GetObjectOutput) (*CloudTrailFile, error) {
 	defer object.Body.Close()
 
 	var logFileBlob io.ReadCloser
+	var err error
 	if object.ContentType != nil && *object.ContentType == GZIP_CONTENT_TYPE {
-		logFileBlob, err := gzip.NewReader(object.Body)
+		logFileBlob, err = gzip.NewReader(object.Body)
 		if err != nil {
 			log.Errorf("Error unzipping cloudtrail json file: %s", err)
 			return nil, err
@@ -153,7 +154,7 @@ func readLogFile(object *s3.GetObjectOutput) (*CloudTrailFile, error) {
 	}
 
 	blobBuf := new(bytes.Buffer)
-	_, err := blobBuf.ReadFrom(logFileBlob)
+	_, err = blobBuf.ReadFrom(logFileBlob)
 	if err != nil {
 		log.Errorf("Error reading from logFileBlob: %s", err)
 		return nil, err

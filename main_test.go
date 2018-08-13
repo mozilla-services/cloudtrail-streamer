@@ -35,7 +35,8 @@ func TestReadLogFile(t *testing.T) {
 	zw.Close()
 
 	// Test
-	obj := &s3.GetObjectOutput{Body: buf}
+	cntType := "application/x-gzip"
+	obj := &s3.GetObjectOutput{Body: buf, ContentType: &cntType}
 
 	logFile, err := readLogFile(obj)
 	if err != nil {
