@@ -60,6 +60,12 @@ The number of records in a batched put to the Kinesis stream.
 
 By default, `CT_KINESIS_BATCH_SIZE` is set to `500` (which is the max allowed).
 
+#### CT_EVENT_FILTERS (optional)
+
+Comma-separated list of `eventSource:eventName` that will be filtered out.
+
+Example: `CT_EVENT_FILTERS="kinesis:DescribeStream,elasticmapreduce:ListClusters"`
+
 ## References
 
 The structure of this project is based off of this AWS tutorial:

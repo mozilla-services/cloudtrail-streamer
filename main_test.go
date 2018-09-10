@@ -56,3 +56,17 @@ func TestReadLogFile(t *testing.T) {
 		t.Fatal("Incorrectly parsed record.")
 	}
 }
+
+var testFilters = "kinesis:DescribeStream,elasticmapreduce:ListClusters"
+
+func TestParseFilters(t *testing.T) {
+	eventFilters := parseFilters(testFilters)
+
+	if len(eventFilters) != 2 {
+		t.Fatal("Parsing erroring, len(eventFilters) != 2")
+	}
+
+	if eventFilters[0].EventSource != "kinesis.amazonaws.com" {
+		t.Fatal("Parsing error, eventFilters[0].EventSource != kinesis.amazonaws.com")
+	}
+}
