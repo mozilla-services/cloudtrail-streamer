@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -48,6 +49,8 @@ type Config struct {
 
 	awsKinesisClient *kinesis.Kinesis
 	awsSession       *session.Session
+
+	eventFilters []*EventFilter
 }
 
 func (c *Config) init() error {
@@ -93,11 +96,50 @@ func (c *Config) init() error {
 		aws.NewConfig().WithRegion(c.awsKinesisRegion),
 	)
 
+	filters := os.Getenv("CT_EVENT_FILTERS")
+	if filters != "" {
+		c.eventFilters = parseFilters(filters)
+	}
+
 	return nil
 }
 
 type CloudTrailFile struct {
 	Records []map[string]interface{} `json:"Records"`
+}
+
+type EventFilter struct {
+	EventName   string
+	EventSource string
+}
+
+func parseFilters(filters string) []*EventFilter {
+	var eventFilters []*EventFilter
+	for _, filter := range strings.Split(filters, ",") {
+		event_filter := strings.Split(filter, ":")
+		if len(event_filter) != 2 {
+			continue
+		}
+		eventFilters = append(eventFilters, newEventFilter(event_filter[0], event_filter[1]))
+	}
+	return eventFilters
+}
+
+func newEventFilter(source, name string) *EventFilter {
+	return &EventFilter{EventName: name, EventSource: fmt.Sprintf("%s.amazonaws.com", source)}
+}
+
+func (ef *EventFilter) DoesMatch(record map[string]interface{}) bool {
+	return record["eventName"] == ef.EventName || record["eventSource"] == ef.EventSource
+}
+
+func doFiltersMatch(record map[string]interface{}) bool {
+	for _, ef := range globalConfig.eventFilters {
+		if ef.DoesMatch(record) {
+			return true
+		}
+	}
+	return false
 }
 
 func fetchLogFromS3(s3Client *s3.S3, bucket string, objectKey string) (*s3.GetObjectOutput, error) {
@@ -156,6 +198,10 @@ func putRecordsToKinesis(logfile *CloudTrailFile) error {
 	var kRecordsBuf []*kinesis.PutRecordsRequestEntry
 
 	for _, record := range logfile.Records {
+		if doFiltersMatch(record) {
+			continue
+		}
+
 		log.Debugf("Writing record to kinesis: %v", record)
 		encodedRecord, err := json.Marshal(record)
 		if err != nil {
@@ -266,6 +312,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Invalid config (%v): %s", globalConfig, err)
 	}
+
+	log.Debugf("Running with filters: %v", globalConfig.eventFilters)
 
 	if globalConfig.eventType == "S3" {
 		log.Debug("Starting S3Handler")
