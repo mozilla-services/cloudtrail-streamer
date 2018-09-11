@@ -117,6 +117,9 @@ func parseFilters(filters string) []*EventFilter {
 	var eventFilters []*EventFilter
 	for _, filter := range strings.Split(filters, ",") {
 		event_filter := strings.Split(filter, ":")
+		if len(event_filter) != 2 {
+			continue
+		}
 		eventFilters = append(eventFilters, newEventFilter(event_filter[0], event_filter[1]))
 	}
 	return eventFilters

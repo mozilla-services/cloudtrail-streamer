@@ -58,6 +58,7 @@ func TestReadLogFile(t *testing.T) {
 }
 
 var testFilters = "kinesis:DescribeStream,elasticmapreduce:ListClusters"
+var testBadFilters = "kinesisDescribeStream,foo:bar:,elasticmapreduce:ListClusters"
 
 func TestParseFilters(t *testing.T) {
 	eventFilters := parseFilters(testFilters)
@@ -65,8 +66,21 @@ func TestParseFilters(t *testing.T) {
 	if len(eventFilters) != 2 {
 		t.Fatal("Parsing erroring, len(eventFilters) != 2")
 	}
-
 	if eventFilters[0].EventSource != "kinesis.amazonaws.com" {
 		t.Fatal("Parsing error, eventFilters[0].EventSource != kinesis.amazonaws.com")
+	}
+
+	eventFiltersWithBad := parseFilters(testBadFilters)
+
+	if len(eventFiltersWithBad) != 1 {
+		t.Fatal("Parsing erroring, len(eventFiltersWithBad) != 1")
+	}
+
+	if eventFiltersWithBad[0].EventSource != "elasticmapreduce.amazonaws.com" {
+		t.Fatal("Parsing error, eventFiltersWithBad[0].EventSource != elasticmapreduce.amazonaws.com")
+	}
+
+	if eventFiltersWithBad[0].EventName != "ListClusters" {
+		t.Fatal("Parsing error, eventFiltersWithBad[0].EventName != ListClusters")
 	}
 }
