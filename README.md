@@ -1,7 +1,7 @@
 # Lambda Function for Cloudtrail to Kinesis streaming
 
 This is a Lambda function that will stream Cloudtrail logs saved to an S3 bucket to
-a single Kinesis stream.
+either a single Kinesis stream or a single GCP PubSub topic or both!
 
 It can support any number of S3 buckets, as it executes based off of any S3 notification
 events sent either directly to the lambda func or to an SNS topic that the lambda func subscribes
@@ -22,15 +22,35 @@ An example CloudFormation template exists in the [cf](./cf) directory. This will
 create everything needed for the lambda function to function as well as a mock s3
 bucket and kinesis stream that can be used for testing.
 
+#### A note on GCP PubSub configuration
+
+If you want to send Cloudtrail records to GCP's PubSub, you will need to additionally provide a
+JSON file in the Lambda code bundle named `gcp_credentials.json` that holds the Service Account credentials
+that will be used to publish to the configured topic.
+
+We support (and recommend) using [sops](https://github.com/mozilla/sops) to encrypt this JSON blob.
+
 ### Environment Variables
 
-#### CT_KINESIS_STREAM (required)
+#### CT_TOPIC_ID (required if CT_KINESIS_STREAM is not set)
+
+The topic id of the GCP PubSub topic that Cloudtrail records will be pushed to.
+
+Example: `CT_TOPIC_ID="cloudtrail-streamer"`
+
+#### CT_PROJECT_ID (required if CT_TOPIC_ID is set)
+
+The id of the GCP project that holds the PubSub topic that Cloudtrail records will be pushed to.
+
+Example: `CT_PROJECT_ID="my-gcp-project"`
+
+#### CT_KINESIS_STREAM (required if CT_TOPID_ID is not set)
 
 The name of the Kinesis stream that Cloudtrail records will be pushed to.
 
 Example: `CT_KINESIS_STREAM="cloudtrail-streamer"`
 
-#### CT_KINESIS_REGION (required)
+#### CT_KINESIS_REGION (required if CT_KINESIS_STREAM is set)
 
 The region that the Kinesis stream lives in.
 
