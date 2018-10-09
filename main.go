@@ -359,6 +359,7 @@ func (k *KinesisStreamer) Stream() error {
 	for {
 		select {
 		case r := <-k.ch:
+			log.Debug("Adding record to kinesis records buffer")
 			record := []byte(r)
 			kRecordsBuf = append(kRecordsBuf, &kinesis.PutRecordsRequestEntry{
 				Data:         record,
@@ -366,6 +367,7 @@ func (k *KinesisStreamer) Stream() error {
 			})
 
 			if len(kRecordsBuf) > 0 && len(kRecordsBuf)%globalConfig.awsKinesisBatchSize == 0 {
+				log.Debugf("PutRecords to kinesis with a len of %d", len(kRecordsBuf))
 				_, err := globalConfig.awsKinesisClient.PutRecords(&kinesis.PutRecordsInput{
 					Records:    kRecordsBuf,
 					StreamName: aws.String(globalConfig.awsKinesisStream),
@@ -380,6 +382,7 @@ func (k *KinesisStreamer) Stream() error {
 
 		case <-k.quit:
 			if len(kRecordsBuf) != 0 {
+				log.Debugf("PutRecords to kinesis with a len of %d", len(kRecordsBuf))
 				_, err := globalConfig.awsKinesisClient.PutRecords(&kinesis.PutRecordsInput{
 					Records:    kRecordsBuf,
 					StreamName: aws.String(globalConfig.awsKinesisStream),
