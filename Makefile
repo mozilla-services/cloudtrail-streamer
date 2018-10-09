@@ -18,9 +18,11 @@ docker_build: clean build
 	apt-get update
 	apt-get install -y zip
 	zip cloudtrail-streamer.zip cloudtrail-streamer
+	zip -r cloudtrail-streamer.zip gcp_credentials.json || true
 
 local_build: clean build
 	zip cloudtrail-streamer.zip cloudtrail-streamer
+	zip -r cloudtrail-streamer.zip gcp_credentials.json || true
 
 clean:
 	rm -f cloudtrail-streamer cloudtrail-streamer.zip
