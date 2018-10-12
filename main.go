@@ -22,6 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/kinesis"
 	"github.com/aws/aws-sdk-go/service/s3"
 
+	stackdriver "cloud.google.com/go/logging"
 	"cloud.google.com/go/pubsub"
 	"google.golang.org/api/option"
 
@@ -57,10 +58,12 @@ type Config struct {
 	awsKinesisClient *kinesis.Kinesis
 	awsSession       *session.Session
 
-	gcpProjectId string // GCP Project Id for where the PubSub Topic lives
-	gcpTopicId   string // GCP PubSub Topic Id
+	gcpProjectId       string // GCP Project Id for where the PubSub Topic or Stackdriver logger live
+	gcpTopicId         string // GCP PubSub Topic Id
+	gcpStackdriverName string // GCP Stackdriver name
 
-	pubsubClient *pubsub.Client
+	pubsubClient      *pubsub.Client
+	stackdriverClient *stackdriver.Client
 
 	eventFilters []*EventFilter
 }
@@ -109,8 +112,9 @@ func (c *Config) init() error {
 
 	c.awsKinesisStream = os.Getenv("CT_KINESIS_STREAM")
 	c.gcpTopicId = os.Getenv("CT_TOPIC_ID")
-	if c.awsKinesisStream == "" && c.gcpTopicId == "" {
-		return fmt.Errorf("At least CT_KINESIS_STREAM or CT_TOPIC_ID must be set")
+	c.gcpStackdriverName = os.Getenv("CT_STACKDRIVER_NAME")
+	if c.awsKinesisStream == "" && c.gcpTopicId == "" && c.gcpStackdriverName == "" {
+		return fmt.Errorf("At least one of CT_KINESIS_STREAM, CT_TOPIC_ID, or CT_STACKDRIVER_NAME must be set")
 	}
 
 	c.awsKinesisRegion = os.Getenv("CT_KINESIS_REGION")
@@ -142,7 +146,7 @@ func (c *Config) init() error {
 
 	c.gcpProjectId = os.Getenv("CT_PROJECT_ID")
 
-	if c.gcpTopicId != "" {
+	if c.gcpTopicId != "" || c.gcpStackdriverName != "" {
 		if c.gcpProjectId == "" {
 			return fmt.Errorf("CT_PROJECT_ID must be set")
 		}
@@ -152,9 +156,17 @@ func (c *Config) init() error {
 			log.Fatalf("Error getting GCP credentials. Err: %s", err)
 		}
 
-		c.pubsubClient, err = pubsub.NewClient(context.TODO(), c.gcpProjectId, option.WithCredentialsJSON(gcpPubSubCredentials))
-		if err != nil {
-			log.Fatalf("Error creating pubsubClient. Err: %s", err)
+		if c.gcpTopicId != "" {
+			c.pubsubClient, err = pubsub.NewClient(context.Background(), c.gcpProjectId, option.WithCredentialsJSON(gcpPubSubCredentials))
+			if err != nil {
+				log.Fatalf("Error creating pubsubClient. Err: %s", err)
+			}
+		}
+		if c.gcpStackdriverName != "" {
+			c.stackdriverClient, err = stackdriver.NewClient(context.Background(), c.gcpProjectId, option.WithCredentialsJSON(gcpPubSubCredentials))
+			if err != nil {
+				log.Fatalf("Error creating stackdriverClient. Err: %s", err)
+			}
 		}
 	}
 
@@ -252,9 +264,10 @@ func readLogFile(object *s3.GetObjectOutput) (*CloudTrailFile, error) {
 }
 
 type Streamer struct {
-	kinesisStreamer *KinesisStreamer
-	pubsubStreamer  *PubSubStreamer
-	quit            chan int
+	kinesisStreamer     *KinesisStreamer
+	pubsubStreamer      *PubSubStreamer
+	stackdriverStreamer *StackdriverStreamer
+	quit                chan int
 }
 
 func NewStreamer() *Streamer {
@@ -268,16 +281,23 @@ func NewStreamer() *Streamer {
 		s.pubsubStreamer = NewPubSubStreamer(globalConfig.pubsubClient)
 	}
 
+	if globalConfig.gcpStackdriverName != "" {
+		s.stackdriverStreamer = NewStackdriverStreamer(globalConfig.stackdriverClient)
+	}
+
 	return s
 }
 
 func (s *Streamer) Close() {
-	log.Debug("Closing streamers.")
+	log.Info("Closing streamers")
 	if s.kinesisStreamer != nil {
 		s.kinesisStreamer.Close()
 	}
 	if s.pubsubStreamer != nil {
 		s.pubsubStreamer.Close()
+	}
+	if s.stackdriverStreamer != nil {
+		s.stackdriverStreamer.Close()
 	}
 	s.quit <- 0
 }
@@ -333,6 +353,9 @@ func (s *Streamer) streamToServices(logfile *CloudTrailFile) {
 		if s.pubsubStreamer != nil {
 			s.pubsubStreamer.Send(encodedRecord)
 		}
+		if s.stackdriverStreamer != nil {
+			s.stackdriverStreamer.Send(encodedRecord)
+		}
 	}
 }
 
@@ -359,7 +382,6 @@ func (k *KinesisStreamer) Stream() error {
 	for {
 		select {
 		case r := <-k.ch:
-			log.Debug("Adding record to kinesis records buffer")
 			record := []byte(r)
 			kRecordsBuf = append(kRecordsBuf, &kinesis.PutRecordsRequestEntry{
 				Data:         record,
@@ -367,7 +389,7 @@ func (k *KinesisStreamer) Stream() error {
 			})
 
 			if len(kRecordsBuf) > 0 && len(kRecordsBuf)%globalConfig.awsKinesisBatchSize == 0 {
-				log.Debugf("PutRecords to kinesis with a len of %d", len(kRecordsBuf))
+				log.Infof("PutRecords to kinesis with a len of %d", len(kRecordsBuf))
 				_, err := globalConfig.awsKinesisClient.PutRecords(&kinesis.PutRecordsInput{
 					Records:    kRecordsBuf,
 					StreamName: aws.String(globalConfig.awsKinesisStream),
@@ -382,7 +404,7 @@ func (k *KinesisStreamer) Stream() error {
 
 		case <-k.quit:
 			if len(kRecordsBuf) != 0 {
-				log.Debugf("PutRecords to kinesis with a len of %d", len(kRecordsBuf))
+				log.Infof("PutRecords to kinesis with a len of %d", len(kRecordsBuf))
 				_, err := globalConfig.awsKinesisClient.PutRecords(&kinesis.PutRecordsInput{
 					Records:    kRecordsBuf,
 					StreamName: aws.String(globalConfig.awsKinesisStream),
@@ -425,9 +447,28 @@ func (ps *PubSubStreamer) Close() {
 	ps.topic.Stop()
 }
 
+type StackdriverStreamer struct {
+	logger *stackdriver.Logger
+}
+
+func NewStackdriverStreamer(client *stackdriver.Client) *StackdriverStreamer {
+	l := client.Logger(globalConfig.gcpStackdriverName)
+	return &StackdriverStreamer{logger: l}
+}
+
+func (s *StackdriverStreamer) Send(record []byte) {
+	s.logger.Log(stackdriver.Entry{Payload: json.RawMessage(record)})
+}
+
+func (s *StackdriverStreamer) Close() {
+	err := s.logger.Flush()
+	if err != nil {
+		log.Errorf("Error flushing stackdriver logger. Err: %s", err)
+	}
+}
+
 func S3Handler(ctx context.Context, s3Event events.S3Event) error {
-	log.Debugf("Received context: %+v", ctx)
-	log.Debugf("Handling S3 event: %v", s3Event)
+	log.Infof("Handling S3 event: %v", s3Event)
 
 	streamer := NewStreamer()
 	go streamer.streamInBackground()
@@ -448,7 +489,7 @@ func S3Handler(ctx context.Context, s3Event events.S3Event) error {
 }
 
 func SNSHandler(ctx context.Context, snsEvent events.SNSEvent) error {
-	log.Debugf("Handling SNS event: %+v", snsEvent)
+	log.Infof("Handling SNS event: %+v", snsEvent)
 
 	for _, snsRecord := range snsEvent.Records {
 		var s3Event events.S3Event
@@ -467,6 +508,7 @@ func SNSHandler(ctx context.Context, snsEvent events.SNSEvent) error {
 }
 
 func main() {
+	log.Info("Starting cloudtrail-streamer")
 	err := globalConfig.init()
 	if err != nil {
 		log.Fatalf("Invalid config (%v): %s", globalConfig, err)
