@@ -45,7 +45,7 @@ The topic id of the GCP PubSub topic that Cloudtrail records will be pushed to.
 
 Example: `CT_TOPIC_ID="cloudtrail-streamer"`
 
-#### CT_PROJECT_ID (required if CT_TOPIC_ID is set)
+#### CT_PROJECT_ID (required if CT_STACKDRIVER_NAME or CT_TOPIC_ID are set)
 
 The id of the GCP project that holds the PubSub topic that Cloudtrail records will be pushed to.
 
