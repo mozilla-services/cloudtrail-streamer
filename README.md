@@ -1,3 +1,6 @@
+__Note__: This repository has been deprecated; the contents have been merged
+into [foxsec-pipeline](https://github.com/mozilla-services/foxsec-pipeline/tree/master/contrib/cloudtrail-streamer).
+
 # Lambda Function for Cloudtrail to Kinesis streaming
 
 This is a Lambda function that will stream Cloudtrail logs saved to an S3 bucket to
